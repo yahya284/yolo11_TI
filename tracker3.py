@@ -207,6 +207,7 @@ class ObjectCounter(BaseSolution):
             label = f"{speed_label}, ID: {track_id}"
             self.annotator.box_label(box, label=label, color=colors(int(cls), True))
 
+    
     def count(self, im0):
         """Main counting function to track objects and update counts."""
         if not self.region_initialized:

@@ -3,9 +3,10 @@ from tracker3 import ObjectCounter
 from pathlib import Path
 import logging
 import yt_dlp
+from heatmap import HeatMapAnnotator
 
 class YouTubeStreamCounter:
-    def __init__(self, youtube_url, region_points_1=None,region_points_2=None ,model_path="yolo11n.pt", classes=None, show_counts=True):
+    def __init__(self, youtube_url, region_points_1=None, region_points_2=None, model_path="yolo11n.pt", classes=None, show_counts=True):
         """
         Initialize the YouTube stream counter system.
         
@@ -17,8 +18,7 @@ class YouTubeStreamCounter:
             show_counts (bool): Whether to show both in and out counts
         """
         self.youtube_url = youtube_url
-        self.region_points_1 = region_points_1 or [(135, 208), (676, 203)]
-        self.region_points_2 = region_points_2 or [(65, 33), (76, 20)]
+        self.region = [(300, 450), (210, 270),(645,240), (930, 375)]  # Single purple line for speed detection
         self.classes = classes or [2, 5, 7]  # Default classes if none provided
         
         # Initialize YouTube stream
@@ -28,8 +28,7 @@ class YouTubeStreamCounter:
             
         # Initialize the object counter
         self.counter = ObjectCounter(
-            region_1=self.region_points_1,
-            region_2=self.region_points_2,
+            region=self.region,  # Pass the region for the purple line
             model=model_path,
             classes=self.classes,
             show_in=show_counts,
@@ -46,6 +45,10 @@ class YouTubeStreamCounter:
         
         # Mouse callback state
         self.mouse_position = None
+        
+        # Initialize heatmap
+        self.heatmap = HeatMapAnnotator(opacity=0.5, radius=25)
+        self.show_heatmap = False  # Flag to toggle heatmap visibility
 
     def _initialize_stream(self):
         """
@@ -105,6 +108,23 @@ class YouTubeStreamCounter:
         # Process the frame with the counter
         processed_frame = self.counter.count(frame)
         
+        # Apply heatmap if enabled
+        if self.show_heatmap:
+            # Format detections for heatmap
+            detections = []
+            if hasattr(self.counter, 'boxes') and hasattr(self.counter, 'clss'):
+                for box, cls in zip(self.counter.boxes, self.counter.clss):
+                    # Format: [xyxy, confidence, class_id, track_id]
+                    detections.append([
+                        box,  # xyxy coordinates
+                        1.0,  # confidence (using 1.0 as these are tracked objects)
+                        int(cls),  # class_id
+                        None  # track_id (not needed for heatmap)
+                    ])
+            
+            # Apply heatmap
+            processed_frame = self.heatmap.annotate(processed_frame, detections)
+        
         return processed_frame
 
     def run(self, display=True, frame_skip=2, max_reconnect_attempts=3):
@@ -154,6 +174,9 @@ class YouTubeStreamCounter:
                     elif key == ord('p'):
                         self.logger.info("Playback paused - press any key to continue")
                         cv2.waitKey(0)
+                    elif key == ord('h'):
+                        self.show_heatmap = not self.show_heatmap
+                        self.logger.info(f"Heatmap {'enabled' if self.show_heatmap else 'disabled'}")
 
                 # Reset reconnect attempts on successful frame processing
                 reconnect_attempts = 0
@@ -198,8 +221,7 @@ def main():
         # Initialize and run the counter system
         counter_system = YouTubeStreamCounter(
             youtube_url=youtube_url,
-            region_points_1=[(135, 208), (676, 203)], 
-            region_points_2=[(235, 135), (376, 50)], 
+            region_points_1=[(50, 180), (950, 180)],  # Purple line for speed detection
             classes=[2, 5, 7],
             show_counts=True
         )
@@ -210,6 +232,7 @@ def main():
         # Get final counts
         final_counts = counter_system.get_counts()
         print("\nFinal Counts:")
+        print(f"Total IN: {final_counts['in_count']}")
         print(f"Total IN: {final_counts['in_count']}")
         print(f"Total OUT: {final_counts['out_count']}")
         print("\nClass-wise counts:")
