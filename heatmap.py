@@ -70,7 +70,10 @@ class HeatMapAnnotator:
     ) -> np.ndarray:
         self._initialize_heat_matrix((scene.shape[0], scene.shape[1]))
         
-        # Update heat matrix with new detections
+        # Appliquer un facteur de décroissance pour effacer les traces anciennes
+        self._heat_matrix *= 1  # Ajustez ce facteur entre 0 et 1 pour un effacement plus ou moins rapide.
+        
+        # Mettre à jour la matrice de chaleur avec les nouvelles détections
         for xyxy, confidence, class_id, _ in detections:
             if filter_class_id is not None and class_id != filter_class_id:
                 continue
@@ -89,5 +92,5 @@ class HeatMapAnnotator:
         self._apply_gaussian_blur()
         heatmap = self._create_overlay((scene.shape[0], scene.shape[1]))
         
-        # Blend heatmap with original frame
+        # Mélanger la carte thermique avec la scène d'origine
         return cv2.addWeighted(scene, 1, heatmap, self._opacity, 0)

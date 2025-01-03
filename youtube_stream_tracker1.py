@@ -18,7 +18,7 @@ class YouTubeStreamCounter:
             show_counts (bool): Whether to show both in and out counts
         """
         self.youtube_url = youtube_url
-        self.region = [(300, 450), (210, 270),(645,240), (930, 375)]  # Single purple line for speed detection
+        self.region = [(300, 450), (210, 270),(645,244), (930, 375)]  # Single purple line for speed detection
         self.classes = classes or [2, 5, 7]  # Default classes if none provided
         
         # Initialize YouTube stream

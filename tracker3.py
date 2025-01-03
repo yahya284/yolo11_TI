@@ -5,6 +5,7 @@ from datetime import datetime
 import numpy as np
 import torch
 from time import time
+from collections import defaultdict, deque
 from ultralytics.solutions.solutions import BaseSolution
 from ultralytics.utils.plotting import Annotator, colors
 
@@ -20,18 +21,31 @@ class ObjectCounter(BaseSolution):
         self.track_history = {}  # Store tracking history for each ID
         self.tracked_speeds = {}  # Store calculated speeds
         
-        # Speed tracking parameters
-        self.speed_tracking = {
-            'positions': {},     # Last known positions
-            'timestamps': {},    # Last timestamp for each ID
-            'smoothed_speeds': {} # Smoothed speed values
-        }
+        # Initialize perspective transform (using ROI points for transform calculation)
+        self.source_points = np.array([
+            [300, 450],  # Bottom left
+            [210, 270],  # Top left
+            [645, 244],  # Top right
+            [930, 375]   # Bottom right
+        ], dtype=np.float32)
         
-        # Configuration parameters
-        self.pixels_per_meter = 0.1  # Calibration factor (adjust based on camera view)
-        self.speed_smoothing_factor = 0.3  # For exponential smoothing
-        self.min_speed_distance = 50  # Minimum pixels to calculate speed
-        self.min_speed_time = 0.1     # Minimum seconds between measurements
+        # Define target points for bird's eye view (adjusted for typical road dimensions)
+        self.target_width = 15  # meters (typical road width)
+        self.target_height = 30  # meters (visible road length)
+        self.target_points = np.array([
+            [0, self.target_height],
+            [0, 0],
+            [self.target_width, 0],
+            [self.target_width, self.target_height]
+        ], dtype=np.float32)
+        
+        # Calculate perspective transform matrix
+        self.transform_matrix = cv2.getPerspectiveTransform(self.source_points, self.target_points)
+        
+        # Speed tracking parameters
+        self.coordinates = defaultdict(lambda: deque(maxlen=15))  # Reduced buffer for more responsive updates
+        self.speed_tracking = {}  # Store current speeds
+        self.speed_scale_factor = 0.7  # Adjustment factor for speed calibration
         
         self.show_in = self.CFG.get("show_in", True)
         self.show_out = self.CFG.get("show_out", True)
@@ -39,6 +53,14 @@ class ObjectCounter(BaseSolution):
         # Initialize CSV data storage
         self.csv_filename = self.get_daily_filename()
         self.create_csv()
+
+    def transform_point(self, point):
+        """Transform a point using perspective transform matrix."""
+        if isinstance(point, (tuple, list)):
+            point = np.array(point)
+        pts = point.reshape(-1, 1, 2).astype(np.float32)
+        transformed = cv2.perspectiveTransform(pts, self.transform_matrix)
+        return transformed.reshape(-1, 2)
 
     def get_daily_filename(self):
         """Generate a filename based on the current date."""
@@ -77,60 +99,70 @@ class ObjectCounter(BaseSolution):
         df = pd.DataFrame([data])
         df.to_csv(self.csv_filename, mode='a', header=False, index=False)
 
-    def calculate_speed(self, track_id, current_position, current_time):
+    def calculate_speed(self, track_id, current_position):
         """
-        Calculate speed for a tracked object using time and position differences.
+        Calculate speed using perspective transformed coordinates.
         Returns speed in km/h.
         """
-        tracking = self.speed_tracking
+        # Store the current position
+        self.coordinates[track_id].append(current_position)
         
-        # Initialize tracking for new objects
-        if track_id not in tracking['positions']:
-            tracking['positions'][track_id] = current_position
-            tracking['timestamps'][track_id] = current_time
-            tracking['smoothed_speeds'][track_id] = 0
+        # Need at least 2 points to calculate speed
+        if len(self.coordinates[track_id]) < 2:
             return 0
-
-        # Get time difference
-        time_diff = current_time - tracking['timestamps'][track_id]
-        if time_diff < self.min_speed_time:
-            return tracking['smoothed_speeds'][track_id]
-
-        # Calculate distance in pixels
-        prev_pos = tracking['positions'][track_id]
-        distance_px = np.sqrt(
-            (current_position[0] - prev_pos[0]) ** 2 +
-            (current_position[1] - prev_pos[1]) ** 2
-        )
-
-        if distance_px < self.min_speed_distance:
-            return tracking['smoothed_speeds'][track_id]
-
-        # Convert to real-world units and calculate speed
-        distance_m = distance_px * self.pixels_per_meter
-        speed_mps = distance_m / time_diff
-        speed_kmh = speed_mps * 3.6  # Convert m/s to km/h
-
-        # Apply exponential smoothing
-        if track_id in tracking['smoothed_speeds']:
-            prev_speed = tracking['smoothed_speeds'][track_id]
-            speed_kmh = (prev_speed * (1 - self.speed_smoothing_factor) +
-                        speed_kmh * self.speed_smoothing_factor)
-
-        # Update tracking data
-        tracking['positions'][track_id] = current_position
-        tracking['timestamps'][track_id] = current_time
-        tracking['smoothed_speeds'][track_id] = speed_kmh
-
-        return speed_kmh
+            
+        # Transform points to bird's eye view
+        points = np.array(list(self.coordinates[track_id]))
+        transformed_points = self.transform_point(points)
+        
+        # Calculate speed using the last two points
+        if len(transformed_points) >= 2:
+            # Get the last two points
+            p1 = transformed_points[-2]
+            p2 = transformed_points[-1]
+            
+            # Calculate distance in meters
+            distance = np.sqrt(((p2 - p1) ** 2).sum())
+            
+            # Calculate time (assuming 30 fps)
+            time = 1/30.0  # seconds between frames
+            
+            # Calculate speed with calibration factor (m/s to km/h)
+            speed_mps = distance / time
+            
+            # Apply perspective correction factor (speed appears faster from side view)
+            perspective_factor = 0.3  # Reduce speed estimation for side view
+            speed_kmh = speed_mps * 3.6 * self.speed_scale_factor * perspective_factor
+            
+            # Apply threshold to handle unrealistic speeds
+            speed_kmh = min(speed_kmh, 50)  # Cap at 50 km/h for urban roads
+            
+            # Update speed tracking with smoothing
+            if track_id in self.speed_tracking:
+                prev_speed = self.speed_tracking[track_id]
+                speed_kmh = 0.7 * prev_speed + 0.3 * speed_kmh  # Smooth transitions
+            
+            self.speed_tracking[track_id] = speed_kmh
+            
+            return speed_kmh
+            
+        return self.speed_tracking.get(track_id, 0)
 
     def count_objects(self, current_centroid, track_id, prev_position, cls):
         """Count objects and update file based on centroid movements."""
-        if prev_position is None or track_id in self.counted_ids:
+        if prev_position is None:
+            return
+
+        # Calculate speed for every frame
+        current_speed = self.calculate_speed(track_id, current_centroid)
+        # Always update speed for display
+        self.tracked_speeds[track_id] = current_speed
+
+        # Process counting logic
+        if track_id in self.counted_ids:
             return
 
         action = None
-        current_speed = self.calculate_speed(track_id, current_centroid, time())
 
         # Handle linear region counting
         if len(self.region) == 2:
@@ -173,7 +205,6 @@ class ObjectCounter(BaseSolution):
         if action:
             label = f"{self.names[cls]} ID: {track_id}"
             self.save_label_to_file(track_id, label, action, current_speed, self.names[cls])
-            self.tracked_speeds[track_id] = current_speed
 
     def store_classwise_counts(self, cls):
         """Initialize count dictionary for a given class."""
@@ -193,20 +224,19 @@ class ObjectCounter(BaseSolution):
         if labels_dict:
             self.annotator.display_analytics(im0, labels_dict, (104, 31, 17), (255, 255, 255), 10)
 
-        # Display object boxes with speed
+        # Display object boxes with speed for all tracked objects
         for track_id in self.track_ids:
             track_index = self.track_ids.index(track_id)
             cls = self.clss[track_index]
             box = self.boxes[track_index]
             
-            # Get speed for display
+            # Always show current speed
             speed = self.tracked_speeds.get(track_id, 0)
-            speed_label = f"{int(speed)} km/h" if speed > 0 else self.names[int(cls)]
+            speed_label = f"{int(speed)} km/h"
             
             # Combine label information
-            label = f"{speed_label}, ID: {track_id}"
+            label = f"{self.names[int(cls)]} {speed_label}"
             self.annotator.box_label(box, label=label, color=colors(int(cls), True))
-
     
     def count(self, im0):
         """Main counting function to track objects and update counts."""
@@ -216,9 +246,6 @@ class ObjectCounter(BaseSolution):
 
         self.annotator = Annotator(im0, line_width=self.line_width)
         self.extract_tracks(im0)
-        
-        # Draw counting region
-        self.annotator.draw_region(reg_pts=self.region, color=(104, 0, 123), thickness=self.line_width * 2)
 
         # Process each tracked object
         for box, track_id, cls in zip(self.boxes, self.track_ids, self.clss):
@@ -241,7 +268,6 @@ class ObjectCounter(BaseSolution):
             
             # Process counting and speed calculation
             self.count_objects(current_centroid, track_id, prev_position, cls)
-            
             # Draw tracking visualization
             if len(self.track_history[track_id]) > 1:
                 self.annotator.draw_centroid_and_tracks(
