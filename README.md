@@ -27,7 +27,9 @@ traffic-analysis/
 │   └── heatmap.py           # Heat visualization
 │
 ├── models/
-│   └── yolo11n.pt          # Fine-tuned YOLOv11 model
+│   ├── yolo11n.pt          # YOLOv11 model
+|   └── best.pt             # Fine-tuned YOLOv11 model
+│
 │
 ├── data/
 │   └── ...csv     # CSV output directory
@@ -43,6 +45,7 @@ traffic-analysis/
 ### Core Components
 
 1. **Vehicle Tracker (`tracker3.py`)**
+
    - Multi-object tracking system
    - Real-world speed calculation using perspective transform
    - Automated CSV logging of vehicle data
@@ -50,6 +53,7 @@ traffic-analysis/
    - Support for multiple vehicle classes
 
 2. **Stream Processor (`youtube_stream_tracker1.py`)**
+
    - YouTube stream integration
    - Real-time visualization
    - Automatic reconnection handling
@@ -57,6 +61,7 @@ traffic-analysis/
    - Frame rate optimization
 
 3. **Heatmap Generator (`heatmap.py`)**
+
    - Dynamic traffic density visualization
    - Customizable visualization parameters
    - Class-specific filtering options
@@ -67,41 +72,48 @@ traffic-analysis/
    - Specialized accident detection capabilities
    - Real-time inference processing
    - High accuracy in various conditions
+
 ### Testing and Validation Tools
 
 5. **Image Testing (`test_it.py`)**
    This utility allows you to test the accident detection model on individual images:
+
    ```python
    python test_it.py
    ```
+
    Key features:
+
    - Single image processing
    - Visualization of detection results
    - Confidence score display
    - Color-coded class identification
-   
+
    Configuration steps:
+
    1. Replace `"Your API Key Here"` with your actual Roboflow API key
    2. Update `IMAGE_PATH` to point to your test image
    3. Verify the `MODEL_ID` matches your deployed model version
 
 6. **Video Testing (`test_skuld_vid.py`)**
    This tool processes video files for accident detection:
+
    ```python
    python test_skuld_vid.py
    ```
+
    Features:
+
    - Full video processing capability
    - Real-time visualization
    - Output video generation
    - Frame-by-frame analysis
-   
+
    Setup requirements:
+
    1. Insert your Roboflow API key
    2. Set appropriate video input/output paths
    3. Confirm model ID and version
-
-
 
 ## Installation Guide
 
@@ -113,14 +125,15 @@ traffic-analysis/
 
 ### Setup Steps
 
-
 1. **Clone the Repository**
+
    ```bash
    git clone https://github.com/yahya284/yolo11_TI.git
    cd traffic-analysis
    ```
 
 2. **Create Virtual Environment**
+
    ```bash
    python -m venv venv
    source venv/bin/activate  # Linux/Mac
@@ -129,6 +142,7 @@ traffic-analysis/
    ```
 
 3. **Install Dependencies**
+
    ```bash
    pip install -r requirements.txt
    ```
@@ -139,8 +153,6 @@ traffic-analysis/
    mkdir -p models
    # Add instructions for downloading your model
    ```
-
-
 
 ## Usage Guide
 
@@ -186,7 +198,9 @@ counter = YouTubeStreamCounter(
 ## Data Output
 
 ### CSV Format
+
 The system generates dated CSV files with the following structure:
+
 ```
 Track ID, Label, Action, Speed (km/h), Class, Date, Time
 1, Car 1, IN, 45, car, 2025-01-05, 14:30:22
@@ -194,7 +208,9 @@ Track ID, Label, Action, Speed (km/h), Class, Date, Time
 ```
 
 ### Analysis Tools
+
 Included utilities for processing output data:
+
 - Speed distribution analysis
 - Traffic flow patterns
 - Accident statistics
@@ -210,6 +226,7 @@ Included utilities for processing output data:
 ## Accident Detection Capabilities
 
 The fine-tuned YOLOv11 model provides:
+
 - Real-time accident detection
 - Severity classification
 
@@ -224,15 +241,8 @@ The fine-tuned YOLOv11 model provides:
 ## Troubleshooting
 
 Common issues and solutions:
+
 - Stream connection errors: Check network stability
 - GPU memory issues: Adjust batch size
 - CSV writing errors: Check file permissions
 - Model loading fails: Verify CUDA compatibility
-
-
-
-
-
-
-
-
